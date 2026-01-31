@@ -373,10 +373,13 @@ function compareImages(img1Path, img2Path, diffOutputPath) {
         fs.writeFileSync(diffOutputPath, PNG.sync.write(diff));
 
         const totalPixels = width * height;
-        const similarity = (1 - (numDiffPixels / totalPixels)) * 100;
+        let similarity = (1 - (numDiffPixels / totalPixels)) * 100;
+
+        // Ensure range is strictly 0-100
+        similarity = Math.max(0, Math.min(100, similarity));
 
         log(`Similarity calculated: ${similarity.toFixed(2)}% (Dimensions: ${width}x${height})`);
-        return similarity.toFixed(2);
+        return similarity.toFixed(1); // One decimal point is cleaner for UI
     } catch (e) {
         log(`compareImages error: ${e.message}`);
         return "0.00";
@@ -389,113 +392,122 @@ app.use('/temp', express.static(TEMP_DIR));
 
 app.post('/compare', upload.fields([{ name: 'solution' }, { name: 'student' }]), async (req, res) => {
     const solutionFile = req.files['solution']?.[0];
-    const studentFile = req.files['student']?.[0];
+    const studentFiles = req.files['student'] || [];
 
-    if (!solutionFile || !studentFile) {
-        return res.status(400).json({ error: 'Both solution and student zip files are required.' });
+    if (!solutionFile || studentFiles.length === 0) {
+        return res.status(400).json({ error: 'Both solution and at least one student zip file are required.' });
     }
 
     const runId = Date.now().toString();
     const runDir = path.join(TEMP_DIR, runId);
     const solExtractDir = path.join(runDir, 'solution_raw');
-    const stuExtractDir = path.join(runDir, 'student_raw');
 
-    // Setup standard output paths
-    const solScreenshotDir = path.join(runDir, 'solution', 'screenshots');
-    const stuScreenshotDir = path.join(runDir, 'student', 'screenshots');
-    const diffScreenshotDir = path.join(runDir, 'diffs'); // New: Diff storage
-
-    await fs.ensureDir(solScreenshotDir);
-    await fs.ensureDir(stuScreenshotDir);
-    await fs.ensureDir(diffScreenshotDir);
-
-    let solServer, stuServer;
-
+    // Performance tracking
     const { performance } = require('perf_hooks');
     const startOverall = performance.now();
-    const timings = {};
+
+    let solServer; // Declare solServer here to be accessible in finally block
 
     try {
-        // 1. Extract
-        const startExtract = performance.now();
-        log('Extracting ZIPs...');
+        // 1. Prepare Solution (Once)
+        log('Extracting Solution ZIP...');
+        await fs.ensureDir(solExtractDir);
         new AdmZip(solutionFile.path).extractAllTo(solExtractDir, true);
-        new AdmZip(studentFile.path).extractAllTo(stuExtractDir, true);
-        timings.extraction = ((performance.now() - startExtract) / 1000).toFixed(2) + 's';
 
-        // 2. Locate Roots
-        const startRoot = performance.now();
         const solRoot = await findProjectRoot(solExtractDir);
-        const stuRoot = await findProjectRoot(stuExtractDir);
-        timings.rootDetection = ((performance.now() - startRoot) / 1000).toFixed(2) + 's';
+        const solPort = 4000 + Math.floor(Math.random() * 500);
+        solServer = await startServer(solRoot, solPort); // Assign to solServer
 
-        // 3. Build/Serve
-        const startServers = performance.now();
-        log('Starting servers in parallel...');
-        const port1 = 4000 + Math.floor(Math.random() * 1000);
-        const port2 = 5000 + Math.floor(Math.random() * 1000);
+        const solScreenshotDir = path.join(runDir, 'solution', 'screenshots');
+        await fs.ensureDir(solScreenshotDir);
 
-        // Run both server setups simultaneously
-        [solServer, stuServer] = await Promise.all([
-            startServer(solRoot, port1),
-            startServer(stuRoot, port2)
-        ]);
-        timings.serverStartup = ((performance.now() - startServers) / 1000).toFixed(2) + 's';
-
-        // 4. Capture
-        const startCapture = performance.now();
-        const routes = ['/'];
         log('Capturing Solution Screenshots...');
+        const routes = ['/'];
         await captureScreenshots(solServer.baseUrl, routes, solScreenshotDir);
 
-        log('Capturing Student Screenshots...');
-        await captureScreenshots(stuServer.baseUrl, routes, stuScreenshotDir);
-        timings.screenshotCapture = ((performance.now() - startCapture) / 1000).toFixed(2) + 's';
+        // 2. Process Students in Batches (to avoid overloading CPU/RAM)
+        const allResults = [];
+        const BATCH_SIZE = 2; // Process 2 students at a time
 
-        // 5. Compare
-        const startCompare = performance.now();
-        log('Comparing...');
-        const results = {};
-        let totalScore = 0;
-        let count = 0;
+        for (let i = 0; i < studentFiles.length; i += BATCH_SIZE) {
+            const batch = studentFiles.slice(i, i + BATCH_SIZE);
+            const batchPromises = batch.map(async (stuFile, index) => {
+                let stuServer; // Declare stuServer for cleanup within the batch item
+                const stuId = `student_${i + index}`;
+                const stuExtractDir = path.join(runDir, stuId, 'raw');
+                const stuScreenshotDir = path.join(runDir, stuId, 'screenshots');
+                const diffScreenshotDir = path.join(runDir, stuId, 'diffs');
 
-        for (const route of routes) {
-            const fileName = route === '/' ? 'index.png' : `${route.replace(/\//g, '')}.png`;
-            const name = route === '/' ? 'Home Page' : route.replace(/\//g, '');
+                try {
+                    await fs.ensureDir(stuScreenshotDir);
+                    await fs.ensureDir(diffScreenshotDir);
 
-            const s1 = path.join(solScreenshotDir, fileName);
-            const s2 = path.join(stuScreenshotDir, fileName);
-            const d = path.join(diffScreenshotDir, fileName);
+                    log(`Processing ${stuFile.originalname}...`);
+                    new AdmZip(stuFile.path).extractAllTo(stuExtractDir, true);
+                    const stuRoot = await findProjectRoot(stuExtractDir);
+                    const stuPort = 5000 + (i * 10) + (index + Math.floor(Math.random() * 100));
 
-            const score = compareImages(s1, s2, d);
+                    stuServer = await startServer(stuRoot, stuPort); // Assign to stuServer
+                    await captureScreenshots(stuServer.baseUrl, routes, stuScreenshotDir);
 
-            results[name] = {
-                score: `${score}%`,
-                solutionImage: `http://127.0.0.1:${PORT}/temp/${runId}/solution/screenshots/${fileName}`,
-                studentImage: `http://127.0.0.1:${PORT}/temp/${runId}/student/screenshots/${fileName}`,
-                diffImage: `http://127.0.0.1:${PORT}/temp/${runId}/diffs/${fileName}`
-            };
+                    // Compare
+                    const pageResults = {};
+                    let totalScore = 0;
 
-            totalScore += parseFloat(score);
-            count++;
+                    for (const route of routes) {
+                        const fileName = route === '/' ? 'index.png' : `${route.replace(/\//g, '')}.png`;
+                        const solImg = path.join(solScreenshotDir, fileName);
+                        const stuImg = path.join(stuScreenshotDir, fileName);
+                        const diffImg = path.join(diffScreenshotDir, fileName);
+
+                        const score = compareImages(solImg, stuImg, diffImg);
+                        const name = route === '/' ? 'Home Page' : route;
+
+                        pageResults[name] = {
+                            score: `${score}%`,
+                            diffImage: `/temp/${runId}/${stuId}/diffs/${fileName}`,
+                            studentImage: `/temp/${runId}/${stuId}/screenshots/${fileName}`,
+                            solutionImage: `/temp/${runId}/solution/screenshots/${fileName}`
+                        };
+                        totalScore += parseFloat(score);
+                    }
+
+                    let finalOverall = (totalScore / routes.length);
+                    finalOverall = Math.max(0, Math.min(100, finalOverall));
+
+                    return {
+                        studentName: stuFile.originalname,
+                        status: 'success',
+                        overallScore: finalOverall.toFixed(1),
+                        pages: pageResults
+                    };
+                } catch (err) {
+                    log(`Failed to process ${stuFile.originalname}: ${err.message}`);
+                    return {
+                        studentName: stuFile.originalname,
+                        status: 'error',
+                        error: err.message
+                    };
+                } finally {
+                    // Cleanup student server for this batch item
+                    if (stuServer?.process) {
+                        spawn("taskkill", ["/pid", stuServer.process.pid, '/f', '/t']);
+                    }
+                }
+            });
+
+            const batchResults = await Promise.all(batchPromises);
+            allResults.push(...batchResults);
         }
 
-        timings.imageComparison = ((performance.now() - startCompare) / 1000).toFixed(2) + 's';
-        timings.overall = ((performance.now() - startOverall) / 1000).toFixed(2) + 's';
-
-        results['overall'] = `${(totalScore / count).toFixed(2)}%`;
-        results['timings'] = timings;
-
-        log(`Comparison complete. Timings: ${JSON.stringify(timings)}`);
-        res.json(results);
+        const overallTime = ((performance.now() - startOverall) / 1000).toFixed(2) + 's';
+        res.json({
+            runId,
+            results: allResults,
+            timings: { overall: overallTime }
+        });
 
     } catch (error) {
-        log(`Error: ${error.message}`);
-        console.error(error);
-        // Clean up servers immediately if possible
-        if (solServer?.process) spawn("taskkill", ["/pid", solServer.process.pid, '/f', '/t']);
-        if (stuServer?.process) spawn("taskkill", ["/pid", stuServer.process.pid, '/f', '/t']);
-
         res.status(500).json({ error: error.message, stack: error.stack });
     } finally {
         // Cleanup processes just in case

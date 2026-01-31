@@ -4,7 +4,7 @@ import './UploadForm.css';
 
 const UploadForm = ({ onAnalyze, isLoading }) => {
     const [solutionFile, setSolutionFile] = useState(null);
-    const [studentFile, setStudentFile] = useState(null);
+    const [studentFiles, setStudentFiles] = useState([]);
     const [error, setError] = useState('');
     const [status, setStatus] = useState('');
 
@@ -19,7 +19,6 @@ const UploadForm = ({ onAnalyze, isLoading }) => {
             let count = 0;
 
             for (const [path, zipEntry] of Object.entries(loadedZip.files)) {
-                // Filter out large/unnecessary folders
                 if (!path.includes('node_modules/') &&
                     !path.includes('.git/') &&
                     !path.includes('dist/') &&
@@ -39,48 +38,58 @@ const UploadForm = ({ onAnalyze, isLoading }) => {
         }
     };
 
-    const handleFileChange = (setter) => (e) => {
-        if (e.target.files[0]) {
-            setter(e.target.files[0]);
+    const handleStudentFilesChange = (e) => {
+        if (e.target.files.length > 0) {
+            setStudentFiles(Array.from(e.target.files));
         }
     };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!solutionFile || !studentFile) {
-            setError('Please select both ZIP files.');
+        if (!solutionFile || studentFiles.length === 0) {
+            setError('Please select the solution and at least one student ZIP file.');
             return;
         }
         setError('');
 
         const cleanSolution = await sanitizeZip(solutionFile, 'Solution');
-        const cleanStudent = await sanitizeZip(studentFile, 'Student');
+        const cleanStudents = [];
 
-        setStatus('Uploading to server...');
-        onAnalyze(cleanSolution, cleanStudent);
+        for (let i = 0; i < studentFiles.length; i++) {
+            setStatus(`Optimizing Student ${i + 1}/${studentFiles.length}...`);
+            const clean = await sanitizeZip(studentFiles[i], studentFiles[i].name);
+            cleanStudents.push(clean);
+        }
+
+        setStatus('Uploading bulk data...');
+        onAnalyze(cleanSolution, cleanStudents);
     };
 
     return (
         <div className="upload-container glass-panel">
-            <h2>Start Comparison</h2>
+            <h2>Start Batch Comparison</h2>
             <form onSubmit={handleSubmit} className="upload-form">
                 <div className="file-input-group">
-                    <label>Solution Project (.zip)</label>
+                    <label>Solution Project (Reference .zip)</label>
                     <input
                         type="file"
                         accept=".zip"
-                        onChange={handleFileChange(setSolutionFile)}
+                        onChange={(e) => setSolutionFile(e.target.files[0])}
                         disabled={isLoading}
                     />
                 </div>
                 <div className="file-input-group">
-                    <label>Student Project (.zip)</label>
+                    <label>Student Projects (Select one or more .zip)</label>
                     <input
                         type="file"
                         accept=".zip"
-                        onChange={handleFileChange(setStudentFile)}
+                        multiple
+                        onChange={handleStudentFilesChange}
                         disabled={isLoading}
                     />
+                    <div className="file-info">
+                        {studentFiles.length > 0 && `${studentFiles.length} files selected`}
+                    </div>
                 </div>
 
                 {error && <div className="error-message">{error}</div>}
@@ -93,7 +102,7 @@ const UploadForm = ({ onAnalyze, isLoading }) => {
                                 {status || 'Processing...'}
                             </>
                         ) : (
-                            'Run Visual Check'
+                            'Run Bulk Visual Check'
                         )}
                     </span>
                 </button>

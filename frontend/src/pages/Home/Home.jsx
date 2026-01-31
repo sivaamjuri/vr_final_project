@@ -7,13 +7,17 @@ const Home = () => {
     const [results, setResults] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
 
-    const handleAnalyze = async (solutionFile, studentFile) => {
+    const handleAnalyze = async (solutionFile, studentFiles) => {
         setIsLoading(true);
         setResults(null);
 
         const formData = new FormData();
         formData.append('solution', solutionFile);
-        formData.append('student', studentFile);
+
+        // Append multiple student files
+        studentFiles.forEach(file => {
+            formData.append('student', file);
+        });
 
         try {
             const response = await fetch('http://127.0.0.1:3000/compare', {
@@ -27,7 +31,7 @@ const Home = () => {
             }
 
             const data = await response.json();
-            console.log('Analysis Results:', data);
+            console.log('Batch Analysis Results:', data);
             setResults(data);
         } catch (error) {
             console.error(error);

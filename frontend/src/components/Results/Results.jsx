@@ -2,90 +2,116 @@
 import './Results.css';
 
 const Results = ({ data }) => {
-    if (!data) return null;
+    const [selectedIndex, setSelectedIndex] = useState(0);
+
+    if (!data || !data.results) return null;
+
+    const currentProject = data.results[selectedIndex];
 
     return (
-        <div className="results-container glass-panel">
-            <div className="header">
-                <h2>Analysis Report</h2>
-                <div className="overall-score">
-                    <span className="label">Overall Match</span>
-                    <span className="score">{data.overall}</span>
+        <div className="results-container">
+            <div className="batch-summary glass-panel">
+                <h2>Batch Analysis Results</h2>
+                <div className="overall-stats">
+                    <div className="stat-card">
+                        <span className="label">Total Projects</span>
+                        <span className="value">{data.results.length}</span>
+                    </div>
+                    <div className="stat-card">
+                        <span className="label">Total Run Time</span>
+                        <span className="value">{data.timings.overall}</span>
+                    </div>
+                </div>
+
+                <div className="projects-list">
+                    {data.results.map((res, idx) => (
+                        <div
+                            key={idx}
+                            className={`project-tab ${selectedIndex === idx ? 'active' : ''} ${res.status === 'error' ? 'error' : ''}`}
+                            onClick={() => setSelectedIndex(idx)}
+                        >
+                            <span className="p-name">{res.studentName}</span>
+                            {res.status === 'success' ? (
+                                <span className="p-score">{res.overallScore}%</span>
+                            ) : (
+                                <span className="p-error">Failed</span>
+                            )}
+                        </div>
+                    ))}
                 </div>
             </div>
 
-            <div className="pages-grid">
-                {(!data || Object.keys(data).length <= 2) && !data.pages && (
-                    <div className="no-data">No pages were compared. Check console for details.</div>
-                )}
-                {Object.entries(data).map(([name, info], index) => {
-                    if (name === 'overall' || name === 'timings') return null;
-                    return (
-                        <div key={index} className="page-section">
-                            <div className="page-header">
-                                <span className="page-name">{name}</span>
-                                <span className="page-score">{info.score}</span>
-                            </div>
-
-                            <div className="progress-bar-bg">
-                                <div
-                                    className="progress-bar-fill"
-                                    style={{ width: info.score }}
-                                ></div>
-                            </div>
-
-                            <div className="comparison-images">
-                                <div className="img-box">
-                                    <p>Solution</p>
-                                    <img src={info.solutionImage} alt="Solution" />
+            {currentProject && (
+                <div className="detail-view glass-panel">
+                    <div className="project-header">
+                        <div className="header-text">
+                            <span className="badge">Detailed Report</span>
+                            <h3>{currentProject.studentName}</h3>
+                        </div>
+                        {currentProject.status === 'success' && (
+                            <div className="big-score-card">
+                                <div className="score-circle">
+                                    <svg viewBox="0 0 36 36" className="circular-chart">
+                                        <path className="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                                        <path className="circle" style={{ strokeDasharray: `${currentProject.overallScore}, 100` }} d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                                        <text x="18" y="20.35" className="percentage">{currentProject.overallScore}%</text>
+                                    </svg>
                                 </div>
-                                <div className="img-box">
-                                    <p>Student</p>
-                                    <img src={info.studentImage} alt="Student" />
-                                </div>
-                                <div className="img-box diff">
-                                    <p>Visual Diff</p>
-                                    <img src={info.diffImage} alt="Difference" />
-                                </div>
+                                <span className="score-label">Match Accuracy</span>
                             </div>
-                        </div>
-                    );
-                })}
-            </div>
-
-            {data.timings && (
-                <div className="timings-section">
-                    <h3>Performance Breakdown</h3>
-                    <div className="timings-grid">
-                        <div className="timing-item">
-                            <span>Extraction:</span>
-                            <strong>{data.timings.extraction}</strong>
-                        </div>
-                        <div className="timing-item">
-                            <span>Root Detection:</span>
-                            <strong>{data.timings.rootDetection}</strong>
-                        </div>
-                        <div className="timing-item">
-                            <span>Server Startup:</span>
-                            <strong>{data.timings.serverStartup}</strong>
-                        </div>
-                        <div className="timing-item">
-                            <span>Capture:</span>
-                            <strong>{data.timings.screenshotCapture}</strong>
-                        </div>
-                        <div className="timing-item">
-                            <span>Comparison:</span>
-                            <strong>{data.timings.imageComparison}</strong>
-                        </div>
-                        <div className="timing-item total">
-                            <span>Total Time:</span>
-                            <strong>{data.timings.overall}</strong>
-                        </div>
+                        )}
                     </div>
+
+                    {currentProject.status === 'error' ? (
+                        <div className="error-box">
+                            <div className="error-icon">⚠️</div>
+                            <h4>Analysis Failed</h4>
+                            <p>{currentProject.error}</p>
+                        </div>
+                    ) : (
+                        <div className="comparison-stack">
+                            {Object.entries(currentProject.pages).map(([name, info], index) => (
+                                <div key={index} className="comparison-card">
+                                    <div className="card-header">
+                                        <div className="name-box">
+                                            <span className="route-icon">🔗</span>
+                                            <h4>{name}</h4>
+                                        </div>
+                                        <div className="mini-score">{info.score}% match</div>
+                                    </div>
+
+                                    <div className="visual-grid">
+                                        <div className="view-container">
+                                            <div className="view-label">Reference Solution</div>
+                                            <div className="image-wrapper">
+                                                <img src={`http://127.0.0.1:3000${info.solutionImage}`} alt="Solution" />
+                                            </div>
+                                        </div>
+
+                                        <div className="view-container student">
+                                            <div className="view-label">Student Submission</div>
+                                            <div className="image-wrapper">
+                                                <img src={`http://127.0.0.1:3000${info.studentImage}`} alt="Student" />
+                                            </div>
+                                        </div>
+
+                                        <div className="view-container diff">
+                                            <div className="view-label">Visual Difference</div>
+                                            <div className="image-wrapper">
+                                                <img src={`http://127.0.0.1:3000${info.diffImage}`} alt="Difference" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
             )}
         </div>
     );
 };
+
+import { useState } from 'react';
 
 export default Results;
