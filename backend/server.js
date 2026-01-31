@@ -30,6 +30,18 @@ fs.ensureDirSync(TEMP_DIR);
 
 const upload = multer({ dest: UPLOADS_DIR });
 
+// Helper: Logging
+function log(msg) {
+    const logMsg = `[${new Date().toISOString()}] ${msg}\n`;
+    console.log(msg);
+    try {
+        fs.appendFileSync(path.join(__dirname, 'server.log'), logMsg);
+    } catch (e) {
+        console.error("Failed to write to log file:", e);
+    }
+}
+
+// Helper: Find project root (contains package.json or index.html)
 // Helper: Find project root (contains package.json or index.html)
 async function findProjectRoot(baseDir) {
     // Check top level
@@ -49,17 +61,6 @@ async function findProjectRoot(baseDir) {
     throw new Error(`No project root (package.json or index.html) found in ${baseDir}`);
 }
 
-// Helper: Run npm install and start dev server
-// Helper: Logging
-function log(msg) {
-    const logMsg = `[${new Date().toISOString()}] ${msg}\n`;
-    console.log(msg);
-    try {
-        fs.appendFileSync(path.join(__dirname, 'server.log'), logMsg);
-    } catch (e) {
-        console.error("Failed to write to log file:", e);
-    }
-}
 
 // Helper: Run server (React/Static)
 function startServer(projectInfo, port) {
@@ -95,7 +96,6 @@ function startServer(projectInfo, port) {
             let masterPkg = {};
             try {
                 studentPkg = fs.readJsonSync(path.join(projectDir, 'package.json'));
-                masterPkg = fs.readJsonSync(path.join(masterDir, 'package.json'));
             } catch (e) {
                 log(`[${port}] Failed to read package.json files`);
             }
@@ -106,6 +106,8 @@ function startServer(projectInfo, port) {
             const runStart = async () => {
                 // Determine missing dependencies or version mismatches
                 const studentDeps = { ...(studentPkg.dependencies || {}), ...(studentPkg.devDependencies || {}) };
+                const masterDir = path.join(__dirname, 'master_project');
+                const masterPkg = fs.readJsonSync(path.join(masterDir, 'package.json'));
                 const masterDeps = { ...(masterPkg.dependencies || {}), ...(masterPkg.devDependencies || {}) };
 
                 const stillMissing = [];
@@ -161,45 +163,39 @@ function startServer(projectInfo, port) {
 
                 log(`[${port}] Using shared node_modules for speed...`);
                 try {
+                    const masterModules = path.join(masterDir, 'node_modules');
+                    const targetModules = path.join(projectDir, 'node_modules');
                     await fs.ensureSymlink(masterModules, targetModules, 'junction');
-
-                    // NEW: Start json-server if db.json or server.js exists (common in NxtWave assessments)
-                    const dbPath = path.join(projectDir, 'db.json');
-                    const customServerPath = path.join(projectDir, 'server.js');
-                    if (await fs.pathExists(dbPath)) {
-                        log(`[${port}] Starting mockup backend on port 8000...`);
-                        const jsLogStream = fs.createWriteStream(path.join(projectDir, 'json-server.log'), { flags: 'a' });
-
-                        let jsProc;
-                        if (await fs.pathExists(customServerPath)) {
-                            // Run the custom server.js if it exists
-                            jsProc = spawn('node', ['server.js'], {
-                                cwd: projectDir,
-                                shell: true
-                            });
-                        } else {
-                            // Fallback to basic json-server
-                            jsProc = spawn('npx', ['json-server', '--watch', 'db.json', '--port', '8000'], {
-                                cwd: projectDir,
-                                shell: true
-                            });
-                        }
-
-                        jsProc.stdout.on('data', (data) => jsLogStream.write(data));
-                        jsProc.stderr.on('data', (data) => jsLogStream.write(data));
-                        // Give it a moment to start
-                        await new Promise(r => setTimeout(r, 2000));
-                    }
                 } catch (e) {
                     log(`[${port}] Symlink failed: ${e.message}`);
-                    await new Promise((res) => {
-                        const inst = spawn('npm', ['install', '--no-audit', '--no-fund', '--no-progress'], {
+                }
+
+                // NEW: Start json-server if db.json or server.js exists
+                const dbPath = path.join(projectDir, 'db.json');
+                const customServerPath = path.join(projectDir, 'server.js');
+                if (await fs.pathExists(dbPath)) {
+                    log(`[${port}] Starting mockup backend on port 8000...`);
+                    const jsLogStream = fs.createWriteStream(path.join(projectDir, 'json-server.log'), { flags: 'a' });
+
+                    let jsProc;
+                    if (await fs.pathExists(customServerPath)) {
+                        // Run the custom server.js if it exists
+                        jsProc = spawn('node', ['server.js'], {
                             cwd: projectDir,
-                            stdio: 'ignore',
                             shell: true
                         });
-                        inst.on('close', res);
-                    });
+                    } else {
+                        // Fallback to basic json-server
+                        jsProc = spawn('npx', ['json-server', '--watch', 'db.json', '--port', '8000'], {
+                            cwd: projectDir,
+                            shell: true
+                        });
+                    }
+
+                    jsProc.stdout.on('data', (data) => jsLogStream.write(data));
+                    jsProc.stderr.on('data', (data) => jsLogStream.write(data));
+                    // Give it a moment to start
+                    await new Promise(r => setTimeout(r, 2000));
                 }
 
                 log(`[${port}] Starting server...`);
@@ -227,6 +223,9 @@ function startServer(projectInfo, port) {
                     if (basePath.endsWith('/')) basePath = basePath.slice(0, -1);
                 }
 
+                let serverProc;
+                let finalBasePath = basePath;
+
                 // Browser-related envs to prevent opening browser windows
                 const env = {
                     ...process.env,
@@ -241,10 +240,10 @@ function startServer(projectInfo, port) {
 
                 const args = ['run', cmd];
                 if (cmd === 'dev') {
-                    args.push('--', '--port', port.toString(), '--host');
+                    args.push('--', '--port', port.toString(), '--host', '127.0.0.1');
                 }
 
-                const serverProc = spawn('npm', args, {
+                serverProc = spawn('npm', args, {
                     cwd: projectDir,
                     shell: true,
                     env: env
@@ -253,7 +252,11 @@ function startServer(projectInfo, port) {
                 serverProc.stdout.on('data', (data) => logStream.write(data));
                 serverProc.stderr.on('data', (data) => logStream.write(data));
 
-                checkServerReady(port, basePath, serverProc, resolve, reject);
+                serverProc.on('close', () => {
+                    // No global.activeServers counter needed here
+                });
+
+                checkServerReady(port, finalBasePath, serverProc, resolve, reject);
             };
 
             runStart();
@@ -332,10 +335,12 @@ async function captureScreenshots(baseUrl, routes, outputDir) {
 
 // Helper: Normalize image size by padding with transparency
 function normalizeImage(img, width, height) {
+    if (!img || !img.data || typeof img.bitblt !== 'function') {
+        log('normalizeImage error: Invalid image object');
+        return new PNG({ width, height });
+    }
     if (img.width === width && img.height === height) return img;
     const newImg = new PNG({ width, height });
-    // PNG default is transparent/black (0,0,0,0)
-    // Copy original image data into the top-left of the new larger canvas
     img.bitblt(newImg, 0, 0, img.width, img.height, 0, 0);
     return newImg;
 }
@@ -348,8 +353,15 @@ function compareImages(img1Path, img2Path, diffOutputPath) {
             return "0.00";
         }
 
-        const img1 = PNG.sync.read(fs.readFileSync(img1Path));
-        const img2 = PNG.sync.read(fs.readFileSync(img2Path));
+        const raw1 = PNG.sync.read(fs.readFileSync(img1Path));
+        const raw2 = PNG.sync.read(fs.readFileSync(img2Path));
+
+        // Recreate PNG instances to ensure 'bitblt' method is available
+        const img1 = new PNG({ width: raw1.width, height: raw1.height });
+        img1.data = raw1.data;
+
+        const img2 = new PNG({ width: raw2.width, height: raw2.height });
+        img2.data = raw2.data;
 
         const width = Math.max(img1.width, img2.width);
         const height = Math.max(img1.height, img2.height);
@@ -366,7 +378,7 @@ function compareImages(img1Path, img2Path, diffOutputPath) {
             diff.data,
             width,
             height,
-            { threshold: 0.1, includeAA: true }
+            { threshold: 0.01, includeAA: true, alpha: 0, diffMask: true }
         );
 
         // Save diff image
@@ -382,6 +394,15 @@ function compareImages(img1Path, img2Path, diffOutputPath) {
         return similarity.toFixed(1); // One decimal point is cleaner for UI
     } catch (e) {
         log(`compareImages error: ${e.message}`);
+        // Ensure we create a dummy diff image so the UI doesn't break
+        try {
+            if (fs.existsSync(img1Path)) {
+                fs.copyFileSync(img1Path, diffOutputPath);
+            } else if (fs.existsSync(img2Path)) {
+                fs.copyFileSync(img2Path, diffOutputPath);
+            }
+        } catch (copyErr) { console.error('Failed to create fallback diff image', copyErr); }
+
         return "0.00";
     }
 }
@@ -514,14 +535,21 @@ app.post('/compare', upload.fields([{ name: 'solution' }, { name: 'student' }]),
         if (solServer?.process) {
             spawn("taskkill", ["/pid", solServer.process.pid, '/f', '/t']);
         }
-        if (stuServer?.process) {
-            spawn("taskkill", ["/pid", stuServer.process.pid, '/f', '/t']);
+        if (stuServer?.process) { // stuServer might not be defined in this scope if batch logic failed, so check carefully
+            // Actually stuServer is inside the map loop, so it's not available here. 
+            // We rely on the finally block inside the map to kill student servers.
+            // But let's keep it safe.
         }
 
         // Clean uploads
         await fs.remove(solutionFile.path).catch(e => console.error(e));
-        await fs.remove(studentFile.path).catch(e => console.error(e));
+        if (studentFiles) {
+            for (const file of studentFiles) {
+                await fs.remove(file.path).catch(e => console.error(e));
+            }
+        }
     }
+
 });
 
 app.listen(PORT, () => {
