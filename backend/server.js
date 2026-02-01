@@ -256,7 +256,7 @@ function startServer(projectInfo, port) {
                     // No global.activeServers counter needed here
                 });
 
-                checkServerReady(port, finalBasePath, serverProc, resolve, reject);
+                checkServerReady(port, finalBasePath, serverProc, resolve, reject, logPath);
             };
 
             runStart();
@@ -268,15 +268,26 @@ function startServer(projectInfo, port) {
     });
 }
 
-function checkServerReady(port, basePath, serverProcess, resolve, reject) {
+function checkServerReady(port, basePath, serverProcess, resolve, reject, logPath) {
     let attempts = 0;
     const maxAttempts = 180; // 3 minutes
 
     const check = async () => {
         // Check if the process has exited
         if (serverProcess.exitCode !== null) {
+            let logDetails = '';
+            try {
+                if (logPath && await fs.pathExists(logPath)) {
+                    const content = await fs.readFile(logPath, 'utf8');
+                    const lines = content.split('\n');
+                    logDetails = lines.slice(-20).join('\n');
+                }
+            } catch (e) {
+                logDetails = `(Failed to read log: ${e.message})`;
+            }
+
             log(`[${port}] Server process exited early with code ${serverProcess.exitCode}`);
-            return reject(new Error(`Server process on port ${port} exited early with code ${serverProcess.exitCode}. Check dev-server.log.`));
+            return reject(new Error(`Server process on port ${port} exited early with code ${serverProcess.exitCode}.\nLast 20 lines of log:\n${logDetails}`));
         }
 
         if (attempts >= maxAttempts) {
@@ -391,7 +402,7 @@ function compareImages(img1Path, img2Path, diffOutputPath) {
         similarity = Math.max(0, Math.min(100, similarity));
 
         log(`Similarity calculated: ${similarity.toFixed(2)}% (Dimensions: ${width}x${height})`);
-        return similarity.toFixed(1); // One decimal point is cleaner for UI
+        return Math.round(similarity).toFixed(0);
     } catch (e) {
         log(`compareImages error: ${e.message}`);
         // Ensure we create a dummy diff image so the UI doesn't break
@@ -403,7 +414,7 @@ function compareImages(img1Path, img2Path, diffOutputPath) {
             }
         } catch (copyErr) { console.error('Failed to create fallback diff image', copyErr); }
 
-        return "0.00";
+        return "0";
     }
 }
 
@@ -459,22 +470,35 @@ app.post('/compare', upload.fields([{ name: 'solution' }, { name: 'student' }]),
                 const stuScreenshotDir = path.join(runDir, stuId, 'screenshots');
                 const diffScreenshotDir = path.join(runDir, stuId, 'diffs');
 
+                const tStart = performance.now();
+                let tUnzip = 0, tSetup = 0, tScreenshot = 0, tCompare = 0;
+
                 try {
                     await fs.ensureDir(stuScreenshotDir);
                     await fs.ensureDir(diffScreenshotDir);
 
                     log(`Processing ${stuFile.originalname}...`);
+
+                    const tUnzipStart = performance.now();
                     new AdmZip(stuFile.path).extractAllTo(stuExtractDir, true);
+                    tUnzip = performance.now() - tUnzipStart;
+
+                    const t0 = performance.now();
                     const stuRoot = await findProjectRoot(stuExtractDir);
                     const stuPort = 5000 + (i * 10) + (index + Math.floor(Math.random() * 100));
 
                     stuServer = await startServer(stuRoot, stuPort); // Assign to stuServer
+                    tSetup = performance.now() - t0;
+
+                    const t1 = performance.now();
                     await captureScreenshots(stuServer.baseUrl, routes, stuScreenshotDir);
+                    tScreenshot = performance.now() - t1;
 
                     // Compare
                     const pageResults = {};
                     let totalScore = 0;
 
+                    const t2 = performance.now();
                     for (const route of routes) {
                         const fileName = route === '/' ? 'index.png' : `${route.replace(/\//g, '')}.png`;
                         const solImg = path.join(solScreenshotDir, fileName);
@@ -492,15 +516,25 @@ app.post('/compare', upload.fields([{ name: 'solution' }, { name: 'student' }]),
                         };
                         totalScore += parseFloat(score);
                     }
+                    tCompare = performance.now() - t2;
 
                     let finalOverall = (totalScore / routes.length);
                     finalOverall = Math.max(0, Math.min(100, finalOverall));
 
+                    const totalTimeNum = performance.now() - tStart;
+
                     return {
                         studentName: stuFile.originalname,
                         status: 'success',
-                        overallScore: finalOverall.toFixed(1),
-                        pages: pageResults
+                        overallScore: Math.round(finalOverall).toFixed(0),
+                        pages: pageResults,
+                        timings: {
+                            unzip: (tUnzip / 1000).toFixed(2) + 's',
+                            setup: (tSetup / 1000).toFixed(2) + 's',
+                            screenshot: (tScreenshot / 1000).toFixed(2) + 's',
+                            comparison: (tCompare / 1000).toFixed(2) + 's',
+                            total: (totalTimeNum / 1000).toFixed(2) + 's'
+                        }
                     };
                 } catch (err) {
                     log(`Failed to process ${stuFile.originalname}: ${err.message}`);

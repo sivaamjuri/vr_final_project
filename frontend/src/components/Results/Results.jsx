@@ -62,6 +62,31 @@ const Results = ({ data }) => {
                         )}
                     </div>
 
+                    {currentProject.timings && (
+                        <div className="timings-grid">
+                            <div className="timing-item">
+                                <span className="t-label">Unzip</span>
+                                <span className="t-value">{currentProject.timings.unzip || '0.00s'}</span>
+                            </div>
+                            <div className="timing-item">
+                                <span className="t-label">Setup</span>
+                                <span className="t-value">{currentProject.timings.setup}</span>
+                            </div>
+                            <div className="timing-item">
+                                <span className="t-label">Capture</span>
+                                <span className="t-value">{currentProject.timings.screenshot}</span>
+                            </div>
+                            <div className="timing-item">
+                                <span className="t-label">Compare</span>
+                                <span className="t-value">{currentProject.timings.comparison}</span>
+                            </div>
+                            <div className="timing-item total">
+                                <span className="t-label">Total</span>
+                                <span className="t-value">{currentProject.timings.total}</span>
+                            </div>
+                        </div>
+                    )}
+
                     {currentProject.status === 'error' ? (
                         <div className="error-box">
                             <div className="error-icon">⚠️</div>

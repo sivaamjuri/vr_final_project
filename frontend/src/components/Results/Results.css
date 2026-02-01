@@ -2,7 +2,10 @@
     display: flex;
     gap: 2rem;
     width: 100%;
-    max-width: 1200px;
+    max-width: 100%;
+    margin: 0;
+    padding: 1rem;
+    box-sizing: border-box;
     animation: fadeIn 0.5s ease-out;
     align-items: flex-start;
 }
@@ -19,15 +22,21 @@
     }
 }
 
+.header-text {
+    font-size: 20px;
+}
+
 .batch-summary {
-    flex: 0 0 350px;
+    flex: 0 0 30%;
     position: sticky;
     top: 2rem;
     padding: 1.5rem;
 }
 
 .detail-view {
-    flex: 1;
+    flex: 0 0 calc(70% - 2rem);
+    /* Exactly 70% minus the gap */
+    max-width: calc(70% - 2rem);
     padding: 2rem;
 }
 
@@ -308,6 +317,7 @@
 @media (max-width: 1000px) {
     .results-container {
         flex-direction: column;
+        gap: 1rem;
     }
 
     .batch-summary {
@@ -315,11 +325,93 @@
         width: 100%;
         position: static;
     }
+
+    .detail-view {
+        flex: none;
+        width: 100%;
+        max-width: 100%;
+    }
 }
 
 @media (max-width: 1400px) {
     .visual-grid {
         grid-template-columns: 1fr;
         gap: 2rem;
+    }
+}
+
+/* Timings Grid */
+.timings-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 0;
+    margin-bottom: 3rem;
+    background: rgba(0, 0, 0, 0.2);
+    padding: 2rem;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    align-items: center;
+}
+
+.timing-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0 1rem;
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.timing-item:last-child {
+    border-right: none;
+}
+
+.timing-item .t-label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.timing-item .t-value {
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 1.25rem;
+    color: #fff;
+    font-weight: 600;
+}
+
+.timing-item.total .t-value {
+    color: var(--accent-primary);
+    font-size: 1.5rem;
+}
+
+@media (max-width: 768px) {
+    .timings-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 0.75rem;
+        border: none;
+        background: transparent;
+        padding: 0;
+    }
+
+    .timing-item {
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        padding: 1rem 0.5rem;
+        background: rgba(0, 0, 0, 0.2);
+    }
+
+    .timing-item.total {
+        grid-column: 1 / -1;
+        background: rgba(30, 30, 40, 0.6);
+        border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .project-header {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 1.5rem;
     }
 }
