@@ -20,7 +20,7 @@ const Home = () => {
         });
 
         try {
-            const response = await fetch('http://127.0.0.1:3000/compare', {
+            const response = await fetch('https://vr-final-project-backend.onrender.com/compare', {
                 method: 'POST',
                 body: formData,
             });
