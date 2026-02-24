@@ -20,7 +20,9 @@ app.use((req, res, next) => {
     console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
     next();
 });
-
+app.get("/", (req, res) => {
+  res.send("Backend is working 🚀");
+});
 // Setup directories
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
 const TEMP_DIR = path.join(__dirname, 'temp');
